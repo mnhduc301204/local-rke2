@@ -4,6 +4,7 @@
       - haproxy
       - curl
       - ca-certificates
+      - gpg
     state: present
     update_cache: true
 
@@ -24,15 +25,50 @@
     state: started
     daemon_reload: true
 
-- name: Gather installed package facts
-  ansible.builtin.package_facts:
-    manager: auto
+- name: Ensure apt keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Add Cloudflare package signing key
+  ansible.builtin.get_url:
+    url: https://pkg.cloudflare.com/cloudflare-main.gpg
+    dest: /usr/share/keyrings/cloudflare-main.gpg
+    owner: root
+    group: root
+    mode: "0644"
+    timeout: 60
+
+- name: Add Cloudflare cloudflared apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main"
+    filename: cloudflared
+    state: present
+    update_cache: true
 
 - name: Install cloudflared package
   ansible.builtin.apt:
-    deb: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+    name: cloudflared
     state: present
-  when: "'cloudflared' not in ansible_facts.packages"
+
+- name: Verify cloudflared binary
+  ansible.builtin.command: cloudflared --version
+  register: cloudflared_version
+  changed_when: false
+
+- name: Print cloudflared version
+  ansible.builtin.debug:
+    var: cloudflared_version.stdout
+
+- name: Require Cloudflare tunnel token before installing service
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tunnel_token | length > 0
+    fail_msg: "cloudflare_tunnel_token is empty. Set vault_cloudflare_tunnel_token in group_vars/all/vault.yml and run with --ask-vault-pass."
+    success_msg: "cloudflare_tunnel_token is loaded; installing cloudflared service is enabled."
 
 - name: Check cloudflared service unit
   ansible.builtin.stat:
@@ -44,6 +80,8 @@
   register: cloudflared_service_install
   changed_when: cloudflared_service_install.rc == 0
   no_log: true
+  async: 90
+  poll: 5
   when:
     - cloudflare_tunnel_token | length > 0
     - not cloudflared_service_unit.stat.exists
@@ -75,7 +113,7 @@
     var: haproxy_status.stdout
 
 - name: Verify HAProxy HTTP frontend locally
-  ansible.builtin.command: curl -I http://127.0.0.1
+  ansible.builtin.command: curl --max-time 10 -I http://127.0.0.1
   register: haproxy_http_check
   changed_when: false
   failed_when: false
@@ -85,7 +123,7 @@
     var: haproxy_http_check.stdout_lines
 
 - name: Verify HAProxy stats endpoint locally
-  ansible.builtin.command: curl -I http://127.0.0.1:8404/stats
+  ansible.builtin.command: curl --max-time 10 -I http://127.0.0.1:8404/stats
   register: haproxy_stats_check
   changed_when: false
   failed_when: false

@@ -3,6 +3,10 @@ rke2_master_hostname: "rke2-master-01"
 
 lb_ip: "192.168.56.100"
 
+lab_network_cidr: "192.168.56.0/24"
+lab_nat_gateway_ip: "{{ lb_ip }}"
+lab_allow_private_nodes_outbound_internet: true
+
 ingress_http_nodeport: 30080
 ingress_https_nodeport: 30443
 

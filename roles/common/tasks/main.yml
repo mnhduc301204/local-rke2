@@ -2,6 +2,319 @@
   ansible.builtin.hostname:
     name: "{{ inventory_hostname }}"
 
+- name: Disable legacy load balancer NAT service
+  ansible.builtin.systemd:
+    name: rke2-lab-nat
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  failed_when: false
+  when: inventory_hostname in groups['load_balancers']
+
+- name: Remove legacy load balancer NAT service file
+  ansible.builtin.file:
+    path: /etc/systemd/system/rke2-lab-nat.service
+    state: absent
+  when: inventory_hostname in groups['load_balancers']
+
+- name: Disable private-node internet rules when outbound internet is disabled
+  ansible.builtin.systemd:
+    name: rke2-lab-private-node-internet
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  failed_when: false
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['load_balancers']
+
+- name: Remove persisted private-node internet rules when outbound internet is disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/rke2-lab-private-node-internet.service
+    state: absent
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['load_balancers']
+
+- name: Remove private-node outbound forward rule when outbound internet is disabled
+  ansible.builtin.command: >-
+    iptables -D FORWARD
+    -s {{ lab_network_cidr }}
+    -o {{ ansible_default_ipv4.interface }}
+    -j ACCEPT
+  changed_when: false
+  failed_when: false
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['load_balancers']
+
+- name: Remove private-node established return rule when outbound internet is disabled
+  ansible.builtin.command: >-
+    iptables -D FORWARD
+    -d {{ lab_network_cidr }}
+    -i {{ ansible_default_ipv4.interface }}
+    -m conntrack
+    --ctstate ESTABLISHED,RELATED
+    -j ACCEPT
+  changed_when: false
+  failed_when: false
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['load_balancers']
+
+- name: Remove private-node inbound forward drop rule when outbound internet is disabled
+  ansible.builtin.command: >-
+    iptables -D FORWARD
+    -d {{ lab_network_cidr }}
+    -i {{ ansible_default_ipv4.interface }}
+    -j DROP
+  changed_when: false
+  failed_when: false
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['load_balancers']
+
+- name: Remove private-node NAT rule when outbound internet is disabled
+  ansible.builtin.command: >-
+    iptables -t nat -D POSTROUTING
+    -s {{ lab_network_cidr }}
+    -o {{ ansible_default_ipv4.interface }}
+    -j MASQUERADE
+  changed_when: false
+  failed_when: false
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['load_balancers']
+
+- name: Disable private-node default route when outbound internet is disabled
+  ansible.builtin.systemd:
+    name: rke2-lab-default-route
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  failed_when: false
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['rke2_cluster']
+
+- name: Remove persisted private-node default route when outbound internet is disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/rke2-lab-default-route.service
+    state: absent
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['rke2_cluster']
+
+- name: Remove private-node default route when outbound internet is disabled
+  ansible.builtin.command: ip route del default via {{ lab_nat_gateway_ip }}
+  changed_when: false
+  failed_when: false
+  when:
+    - not (lab_allow_private_nodes_outbound_internet | bool)
+    - inventory_hostname in groups['rke2_cluster']
+
+- name: Enable IPv4 forwarding on load balancer gateway
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-rke2-lab-gateway.conf
+    content: |
+      net.ipv4.ip_forward = 1
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Apply IPv4 forwarding immediately on load balancer gateway
+  ansible.builtin.command: sysctl -w net.ipv4.ip_forward=1
+  changed_when: false
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Check load balancer outbound forward rule
+  ansible.builtin.command: >-
+    iptables -C FORWARD
+    -s {{ lab_network_cidr }}
+    -o {{ ansible_default_ipv4.interface }}
+    -j ACCEPT
+  register: lab_outbound_forward_rule_check
+  changed_when: false
+  failed_when: false
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Allow private nodes to initiate outbound traffic
+  ansible.builtin.command: >-
+    iptables -A FORWARD
+    -s {{ lab_network_cidr }}
+    -o {{ ansible_default_ipv4.interface }}
+    -j ACCEPT
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+    - lab_outbound_forward_rule_check.rc != 0
+
+- name: Check load balancer established return traffic rule
+  ansible.builtin.command: >-
+    iptables -C FORWARD
+    -d {{ lab_network_cidr }}
+    -i {{ ansible_default_ipv4.interface }}
+    -m conntrack
+    --ctstate ESTABLISHED,RELATED
+    -j ACCEPT
+  register: lab_established_forward_rule_check
+  changed_when: false
+  failed_when: false
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Allow established return traffic to private nodes
+  ansible.builtin.command: >-
+    iptables -A FORWARD
+    -d {{ lab_network_cidr }}
+    -i {{ ansible_default_ipv4.interface }}
+    -m conntrack
+    --ctstate ESTABLISHED,RELATED
+    -j ACCEPT
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+    - lab_established_forward_rule_check.rc != 0
+
+- name: Check load balancer inbound forward drop rule
+  ansible.builtin.command: >-
+    iptables -C FORWARD
+    -d {{ lab_network_cidr }}
+    -i {{ ansible_default_ipv4.interface }}
+    -j DROP
+  register: lab_inbound_forward_drop_rule_check
+  changed_when: false
+  failed_when: false
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Drop internet-initiated traffic to private nodes
+  ansible.builtin.command: >-
+    iptables -A FORWARD
+    -d {{ lab_network_cidr }}
+    -i {{ ansible_default_ipv4.interface }}
+    -j DROP
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+    - lab_inbound_forward_drop_rule_check.rc != 0
+
+- name: Check load balancer NAT rule
+  ansible.builtin.command: >-
+    iptables -t nat -C POSTROUTING
+    -s {{ lab_network_cidr }}
+    -o {{ ansible_default_ipv4.interface }}
+    -j MASQUERADE
+  register: lab_nat_rule_check
+  changed_when: false
+  failed_when: false
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Configure load balancer NAT rule
+  ansible.builtin.command: >-
+    iptables -t nat -A POSTROUTING
+    -s {{ lab_network_cidr }}
+    -o {{ ansible_default_ipv4.interface }}
+    -j MASQUERADE
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+    - lab_nat_rule_check.rc != 0
+
+- name: Persist load balancer private-node internet rules
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/rke2-lab-private-node-internet.service
+    content: |
+      [Unit]
+      Description=RKE2 lab private node outbound internet rules
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c '/usr/sbin/iptables -C FORWARD -s {{ lab_network_cidr }} -o {{ ansible_default_ipv4.interface }} -j ACCEPT || /usr/sbin/iptables -A FORWARD -s {{ lab_network_cidr }} -o {{ ansible_default_ipv4.interface }} -j ACCEPT'
+      ExecStart=/bin/sh -c '/usr/sbin/iptables -C FORWARD -d {{ lab_network_cidr }} -i {{ ansible_default_ipv4.interface }} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || /usr/sbin/iptables -A FORWARD -d {{ lab_network_cidr }} -i {{ ansible_default_ipv4.interface }} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT'
+      ExecStart=/bin/sh -c '/usr/sbin/iptables -C FORWARD -d {{ lab_network_cidr }} -i {{ ansible_default_ipv4.interface }} -j DROP || /usr/sbin/iptables -A FORWARD -d {{ lab_network_cidr }} -i {{ ansible_default_ipv4.interface }} -j DROP'
+      ExecStart=/bin/sh -c '/usr/sbin/iptables -t nat -C POSTROUTING -s {{ lab_network_cidr }} -o {{ ansible_default_ipv4.interface }} -j MASQUERADE || /usr/sbin/iptables -t nat -A POSTROUTING -s {{ lab_network_cidr }} -o {{ ansible_default_ipv4.interface }} -j MASQUERADE'
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Enable persisted load balancer private-node internet rules
+  ansible.builtin.systemd:
+    name: rke2-lab-private-node-internet
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['load_balancers']
+
+- name: Configure default route through load balancer gateway
+  ansible.builtin.command: ip route replace default via {{ lab_nat_gateway_ip }}
+  changed_when: false
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['rke2_cluster']
+
+- name: Persist default route through load balancer gateway
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/rke2-lab-default-route.service
+    content: |
+      [Unit]
+      Description=RKE2 lab default route through load balancer gateway
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/sbin/ip route replace default via {{ lab_nat_gateway_ip }}
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['rke2_cluster']
+
+- name: Enable persisted default route through load balancer gateway
+  ansible.builtin.systemd:
+    name: rke2-lab-default-route
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - lab_allow_private_nodes_outbound_internet | bool
+    - inventory_hostname in groups['rke2_cluster']
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 86400
+    lock_timeout: 120
+
 - name: Install required packages
   ansible.builtin.apt:
     name:
@@ -17,7 +330,7 @@
       - gnupg
       - lsb-release
     state: present
-    update_cache: true
+    lock_timeout: 120
 
 - name: Enable and start open-iscsi
   ansible.builtin.systemd:
