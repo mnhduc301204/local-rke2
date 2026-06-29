@@ -23,6 +23,29 @@
   register: ingress_nodeport_apply
   changed_when: "'created' in ingress_nodeport_apply.stdout or 'configured' in ingress_nodeport_apply.stdout"
 
+- name: Allow ingress-nginx to trust forwarded headers from HAProxy
+  ansible.builtin.command: >-
+    /var/lib/rancher/rke2/bin/kubectl -n kube-system patch configmap rke2-ingress-nginx-controller
+    --type merge
+    -p '{"data":{"use-forwarded-headers":"true","compute-full-forwarded-for":"true","enable-real-ip":"true","proxy-real-ip-cidr":"192.168.56.100/32"}}'
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: ingress_forwarded_headers_patch
+  changed_when: "'patched' in ingress_forwarded_headers_patch.stdout"
+
+- name: Restart ingress-nginx controller after forwarded header config
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl -n kube-system rollout restart daemonset/rke2-ingress-nginx-controller
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: ingress_nginx_restart
+  changed_when: "'restarted' in ingress_nginx_restart.stdout"
+
+- name: Wait for ingress-nginx controller rollout
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl -n kube-system rollout status daemonset/rke2-ingress-nginx-controller --timeout=300s
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  changed_when: false
+
 - name: Show ingress NodePort service
   ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl get svc -n kube-system ingress-nginx-nodeport -o wide
   environment:

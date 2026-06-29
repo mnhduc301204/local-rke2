@@ -113,7 +113,15 @@
     var: haproxy_status.stdout
 
 - name: Verify HAProxy HTTP frontend locally
-  ansible.builtin.command: curl --max-time 10 -I http://127.0.0.1
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --max-time
+      - "10"
+      - -I
+      - http://127.0.0.1
+      - -H
+      - "Host: {{ rancher_hostname }}"
   register: haproxy_http_check
   changed_when: false
   failed_when: false

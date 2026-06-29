@@ -1,3 +1,12 @@
+- name: Configure VM networking
+  hosts: all_lab
+  become: true
+  tags:
+    - network
+    - netplan
+  roles:
+    - netplan
+
 - name: Prepare all lab nodes
   hosts: all_lab
   become: true
@@ -19,8 +28,44 @@
 - name: Configure ingress NodePort
   hosts: masters
   become: true
+  tags:
+    - k8s_ingress_nodeport
+    - ingress
   roles:
     - k8s_ingress_nodeport
+
+- name: Install Helm
+  hosts: masters
+  become: true
+  tags:
+    - helm
+  roles:
+    - helm
+
+- name: Install cert-manager
+  hosts: masters
+  become: true
+  tags:
+    - cert_manager
+  roles:
+    - cert_manager
+
+- name: Configure Let's Encrypt issuer
+  hosts: masters
+  become: true
+  tags:
+    - cert_issuer
+    - letsencrypt
+  roles:
+    - cert_issuer
+
+- name: Install Rancher
+  hosts: masters
+  become: true
+  tags:
+    - rancher
+  roles:
+    - rancher
 
 - name: Configure load balancer
   hosts: load_balancers

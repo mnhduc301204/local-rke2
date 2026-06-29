@@ -4,8 +4,54 @@ rke2_master_hostname: "rke2-master-01"
 lb_ip: "192.168.56.100"
 
 lab_network_cidr: "192.168.56.0/24"
-lab_nat_gateway_ip: "{{ lb_ip }}"
-lab_allow_private_nodes_outbound_internet: true
+lab_check_internet_connectivity: true
+
+lab_configure_netplan: false
+lab_netplan_apply: true
+lab_netplan_file: "/etc/netplan/99-rke2-lab.yaml"
+lab_netplan_hosts:
+  rke2-lb-01:
+    ethernets:
+      ens33:
+        dhcp4: true
+      ens34:
+        dhcp4: false
+        addresses:
+          - "192.168.56.100/24"
+        nameservers:
+          addresses:
+            - "8.8.8.8"
+            - "1.1.1.1"
+  rke2-master-01:
+    ethernets:
+      ens33:
+        dhcp4: false
+        addresses:
+          - "192.168.56.101/24"
+        nameservers:
+          addresses:
+            - "8.8.8.8"
+            - "1.1.1.1"
+  rke2-worker-01:
+    ethernets:
+      ens33:
+        dhcp4: false
+        addresses:
+          - "192.168.56.102/24"
+        nameservers:
+          addresses:
+            - "8.8.8.8"
+            - "1.1.1.1"
+  rke2-worker-02:
+    ethernets:
+      ens33:
+        dhcp4: false
+        addresses:
+          - "192.168.56.103/24"
+        nameservers:
+          addresses:
+            - "8.8.8.8"
+            - "1.1.1.1"
 
 ingress_http_nodeport: 30080
 ingress_https_nodeport: 30443
@@ -19,3 +65,21 @@ rke2_nodes:
     ip: 192.168.56.103
 
 cloudflare_tunnel_token: "{{ vault_cloudflare_tunnel_token | default('') }}"
+
+rancher_install: true
+rancher_hostname: "rancher.mnhduc.site"
+rancher_bootstrap_password: "{{ vault_rancher_bootstrap_password | default('') }}"
+rancher_chart_repo_name: "rancher-stable"
+rancher_chart_repo_url: "https://releases.rancher.com/server-charts/stable"
+rancher_private_ca: false
+helm_release_timeout: "10m"
+helm_apt_key_fingerprint: "DDF78C3E6EBB2D2CC223C95C62BA89D07698DBC6"
+
+cert_manager_install: true
+cert_manager_chart_version: "v1.17.2"
+
+letsencrypt_install: true
+letsencrypt_email: "mnhduc3012@gmail.com"
+letsencrypt_server: "https://acme-v02.api.letsencrypt.org/directory"
+letsencrypt_cluster_issuer_name: "letsencrypt-prod"
+letsencrypt_ingress_class: "nginx"

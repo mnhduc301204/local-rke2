@@ -1,0 +1,154 @@
+- name: Skip Rancher installation when disabled
+  ansible.builtin.meta: end_play
+  when: not (rancher_install | bool)
+
+- name: Require Rancher hostname
+  ansible.builtin.assert:
+    that:
+      - rancher_hostname | length > 0
+      - rancher_hostname != "rancher.example.com"
+    fail_msg: "Set rancher_hostname in group_vars/all/vars.yml before installing Rancher."
+
+- name: Require Rancher bootstrap password
+  ansible.builtin.assert:
+    that:
+      - rancher_bootstrap_password | length >= 12
+    fail_msg: "Set vault_rancher_bootstrap_password in group_vars/all/vault.yml to a password with at least 12 characters."
+    success_msg: "Rancher bootstrap password is loaded."
+  no_log: true
+
+- name: Verify Helm version
+  ansible.builtin.command: helm version --short
+  register: helm_version
+  changed_when: false
+
+- name: Print Helm version
+  ansible.builtin.debug:
+    var: helm_version.stdout
+
+- name: Add Rancher Helm repository
+  ansible.builtin.command: "helm repo add {{ rancher_chart_repo_name }} {{ rancher_chart_repo_url }}"
+  register: rancher_repo_add
+  changed_when: "'has been added' in rancher_repo_add.stdout"
+  failed_when:
+    - rancher_repo_add.rc != 0
+    - "'already exists' not in rancher_repo_add.stderr"
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  changed_when: false
+
+- name: Check Rancher Helm release status
+  ansible.builtin.command: helm status rancher --namespace cattle-system --output json
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: rancher_helm_status
+  changed_when: false
+  failed_when: false
+
+- name: Parse Rancher Helm release status
+  ansible.builtin.set_fact:
+    rancher_release_status: "{{ (rancher_helm_status.stdout | from_json).info.status | default('not-found') }}"
+  when: rancher_helm_status.rc == 0
+
+- name: Default Rancher Helm release status when missing
+  ansible.builtin.set_fact:
+    rancher_release_status: "not-found"
+  when: rancher_helm_status.rc != 0
+
+- name: Print Rancher Helm release status
+  ansible.builtin.debug:
+    var: rancher_release_status
+
+- name: Remove stuck Rancher Helm release
+  ansible.builtin.command: helm uninstall rancher --namespace cattle-system --wait --timeout {{ helm_release_timeout }}
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  when: rancher_release_status in ['pending-install', 'pending-upgrade', 'pending-rollback']
+
+- name: Install Rancher
+  block:
+    - name: Install Rancher Helm chart
+      ansible.builtin.command:
+        argv:
+          - helm
+          - upgrade
+          - --install
+          - rancher
+          - "{{ rancher_chart_repo_name }}/rancher"
+          - --namespace
+          - cattle-system
+          - --create-namespace
+          - --set
+          - "hostname={{ rancher_hostname }}"
+          - --set
+          - "bootstrapPassword={{ rancher_bootstrap_password }}"
+          - --set
+          - tls=external
+          - --set
+          - "privateCA={{ rancher_private_ca | bool | lower }}"
+          - --set
+          - replicas=1
+          - --wait
+          - --timeout
+          - "{{ helm_release_timeout }}"
+      environment:
+        KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+      no_log: true
+  rescue:
+    - name: Show Rancher Helm status after failed install
+      ansible.builtin.command: helm status rancher --namespace cattle-system
+      environment:
+        KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+      register: rancher_failed_helm_status
+      changed_when: false
+      failed_when: false
+
+    - name: Print Rancher Helm status after failed install
+      ansible.builtin.debug:
+        var: rancher_failed_helm_status.stdout_lines
+
+    - name: Show cattle-system resources after failed install
+      ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl -n cattle-system get pods,svc,ingress,certificate,secret
+      environment:
+        KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+      register: rancher_failed_resources
+      changed_when: false
+      failed_when: false
+
+    - name: Print cattle-system resources after failed install
+      ansible.builtin.debug:
+        var: rancher_failed_resources.stdout_lines
+
+    - name: Show cattle-system warning events after failed install
+      ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl -n cattle-system get events --field-selector type=Warning --sort-by=.lastTimestamp
+      environment:
+        KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+      register: rancher_failed_events
+      changed_when: false
+      failed_when: false
+
+    - name: Print cattle-system warning events after failed install
+      ansible.builtin.debug:
+        var: rancher_failed_events.stdout_lines
+
+    - name: Fail Rancher installation with diagnostics
+      ansible.builtin.fail:
+        msg: "Rancher Helm install failed. See Helm status, cattle-system resources, and warning events above."
+
+- name: Show Rancher rollout status
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl -n cattle-system rollout status deploy/rancher --timeout=300s
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  changed_when: false
+
+- name: Show Rancher ingress
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl -n cattle-system get ingress
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: rancher_ingress
+  changed_when: false
+
+- name: Print Rancher ingress
+  ansible.builtin.debug:
+    var: rancher_ingress.stdout_lines

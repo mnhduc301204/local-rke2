@@ -1,3 +1,4 @@
 # Copy this file to a vault file, then encrypt it with ansible-vault.
 # Do not commit the real vault file.
 vault_cloudflare_tunnel_token: ""
+vault_rancher_bootstrap_password: ""

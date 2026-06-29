@@ -1,0 +1,57 @@
+- name: Install Helm repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gpg
+    state: present
+    update_cache: true
+
+- name: Ensure apt keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Helm apt package signing key
+  ansible.builtin.get_url:
+    url: https://packages.buildkite.com/helm-linux/helm-debian/gpgkey
+    dest: /tmp/helm-apt.gpg
+    owner: root
+    group: root
+    mode: "0644"
+    timeout: 60
+
+- name: Verify Helm apt package signing key
+  ansible.builtin.command: gpg --show-keys --with-fingerprint --with-colons /tmp/helm-apt.gpg
+  register: helm_apt_key_check
+  changed_when: false
+  failed_when: helm_apt_key_fingerprint not in helm_apt_key_check.stdout
+
+- name: Install Helm apt package signing key
+  ansible.builtin.command: gpg --dearmor --yes -o /usr/share/keyrings/helm.gpg /tmp/helm-apt.gpg
+  changed_when: false
+
+- name: Add Helm apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/helm.gpg] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main"
+    filename: helm
+    state: present
+    update_cache: true
+
+- name: Install Helm
+  ansible.builtin.apt:
+    name: helm
+    state: present
+
+- name: Verify Helm version
+  ansible.builtin.command: helm version --short
+  register: helm_version
+  changed_when: false
+
+- name: Print Helm version
+  ansible.builtin.debug:
+    var: helm_version.stdout

@@ -1,0 +1,4 @@
+network:
+  version: 2
+  ethernets:
+{{ lab_netplan_hosts[inventory_hostname].ethernets | to_nice_yaml(indent=2) | indent(4, true) }}

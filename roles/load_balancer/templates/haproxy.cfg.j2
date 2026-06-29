@@ -22,13 +22,14 @@ frontend k8s_ingress_http
     bind *:80
     mode http
     option forwardfor
-    http-request set-header X-Forwarded-Proto http
+    # Cloudflare terminates public TLS before forwarding through cloudflared.
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header X-Forwarded-Ssl on
     default_backend k8s_ingress_http_nodes
 
 backend k8s_ingress_http_nodes
     mode http
     balance roundrobin
-    option httpchk GET /
     default-server inter 5s fall 3 rise 2
 {% for node in rke2_nodes %}
     server {{ node.name }} {{ node.ip }}:{{ ingress_http_nodeport }} check

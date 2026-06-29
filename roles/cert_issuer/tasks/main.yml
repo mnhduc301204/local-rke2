@@ -1,0 +1,40 @@
+- name: Skip Let's Encrypt issuer when disabled
+  ansible.builtin.meta: end_play
+  when: not (letsencrypt_install | bool)
+
+- name: Require Let's Encrypt email
+  ansible.builtin.assert:
+    that:
+      - letsencrypt_email | length > 0
+      - "'@' in letsencrypt_email"
+      - letsencrypt_email != "admin@example.com"
+    fail_msg: "Set letsencrypt_email in group_vars/all/vars.yml before creating the Let's Encrypt issuer."
+
+- name: Render Let's Encrypt issuer manifest
+  ansible.builtin.template:
+    src: letsencrypt-rancher.yaml.j2
+    dest: /tmp/letsencrypt-rancher.yaml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply Let's Encrypt issuer
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl apply -f /tmp/letsencrypt-rancher.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: letsencrypt_apply
+  changed_when: "'created' in letsencrypt_apply.stdout or 'configured' in letsencrypt_apply.stdout"
+
+- name: Wait for Let's Encrypt ClusterIssuer
+  ansible.builtin.command: >-
+    /var/lib/rancher/rke2/bin/kubectl wait clusterissuer/{{ letsencrypt_cluster_issuer_name }}
+    --for=condition=Ready
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  changed_when: false
+  register: letsencrypt_issuer_wait
+
+- name: Print Let's Encrypt issuer wait result
+  ansible.builtin.debug:
+    var: letsencrypt_issuer_wait.stdout_lines

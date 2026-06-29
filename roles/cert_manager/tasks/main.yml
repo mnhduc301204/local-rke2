@@ -1,0 +1,61 @@
+- name: Skip cert-manager installation when disabled
+  ansible.builtin.meta: end_play
+  when: not (cert_manager_install | bool)
+
+- name: Add Jetstack Helm repository
+  ansible.builtin.command: helm repo add jetstack https://charts.jetstack.io
+  register: jetstack_repo_add
+  changed_when: "'has been added' in jetstack_repo_add.stdout"
+  failed_when:
+    - jetstack_repo_add.rc != 0
+    - "'already exists' not in jetstack_repo_add.stderr"
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  changed_when: false
+
+- name: Check cert-manager Helm release status
+  ansible.builtin.command: helm status cert-manager --namespace cert-manager --output json
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: cert_manager_helm_status
+  changed_when: false
+  failed_when: false
+
+- name: Parse cert-manager Helm release status
+  ansible.builtin.set_fact:
+    cert_manager_release_status: "{{ (cert_manager_helm_status.stdout | from_json).info.status | default('not-found') }}"
+  when: cert_manager_helm_status.rc == 0
+
+- name: Default cert-manager Helm release status when missing
+  ansible.builtin.set_fact:
+    cert_manager_release_status: "not-found"
+  when: cert_manager_helm_status.rc != 0
+
+- name: Print cert-manager Helm release status
+  ansible.builtin.debug:
+    var: cert_manager_release_status
+
+- name: Remove stuck cert-manager Helm release
+  ansible.builtin.command: helm uninstall cert-manager --namespace cert-manager --wait --timeout {{ helm_release_timeout }}
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  when: cert_manager_release_status in ['pending-install', 'pending-upgrade', 'pending-rollback']
+
+- name: Install cert-manager
+  ansible.builtin.command: >-
+    helm upgrade --install cert-manager jetstack/cert-manager
+    --namespace cert-manager
+    --create-namespace
+    --version {{ cert_manager_chart_version }}
+    --set crds.enabled=true
+    --wait
+    --timeout {{ helm_release_timeout }}
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+
+- name: Wait for cert-manager webhook
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=300s
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  changed_when: false

@@ -15,23 +15,41 @@ rke2-worker-02   192.168.56.103
 - Static IPs are already configured.
 - `openssh-server` is installed on all VMs.
 - The Ansible control machine can SSH to all VMs.
-- The load balancer VM has internet access. By default Ansible lets private RKE2 nodes initiate outbound internet traffic through the load balancer, while blocking internet-initiated forwarded traffic back to those private nodes.
+- The VMs have outbound internet access through the hypervisor network, for example NAT.
 - Update `ansible_user` in `inventory.ini` if your Ubuntu user is not `duc`.
 - Set `vault_cloudflare_tunnel_token` in an encrypted `group_vars/all/vault.yml` file when you want Ansible to install and start the Cloudflare Tunnel service.
 
 ## Network Exposure
 
-Only `rke2-lb-01` should be exposed outside the lab network. Master and worker nodes stay on the private `192.168.56.0/24` network.
+Only `rke2-lb-01` should receive application traffic from outside the lab, through Cloudflare Tunnel and HAProxy. Master and worker nodes do not need public IP addresses.
 
-Traffic inside `192.168.56.0/24` is allowed normally. The NAT rules only let private nodes initiate outbound internet connections through the load balancer and block internet-initiated forwarded traffic to those private nodes.
+## VM Networking
 
-Set this in `group_vars/all/vars.yml` when you want to control whether private nodes can initiate outbound internet connections through the load balancer:
+Ansible can write netplan files inside the VMs, but it cannot create missing virtual NICs unless the hypervisor is managed separately. In the simple lab setup, keep each VM on the NAT/private network that already lets the nodes reach each other and reach the internet.
 
-```yaml
-lab_allow_private_nodes_outbound_internet: true
+Check interface names first:
+
+```bash
+ansible -i inventory.ini all_lab -m command -a "ip -br link" --ask-pass --ask-become-pass
 ```
 
-Set it to `false` to avoid adding the NAT/default-route rules. In that mode, online installs that use `apt` or `https://get.rke2.io` need another package source or an offline install path.
+Then update `lab_netplan_hosts` in `group_vars/all/vars.yml` if your interface names are not `ens33` and `ens34`. To let Ansible apply netplan, set:
+
+```yaml
+lab_configure_netplan: true
+```
+
+Run only the network step first:
+
+```bash
+ansible-playbook -i inventory.ini site.yml --ask-vault-pass --ask-pass --ask-become-pass --tags network
+```
+
+You can also disable the final ping check without changing routing:
+
+```yaml
+lab_check_internet_connectivity: false
+```
 
 ## Validate SSH
 
@@ -73,6 +91,72 @@ If `group_vars/all/vault.yml` already exists, edit it instead of copying the exa
 
 ```bash
 ansible-vault edit group_vars/all/vault.yml
+```
+
+Set at least these secret values:
+
+```yaml
+vault_cloudflare_tunnel_token: "..."
+vault_rancher_bootstrap_password: "..."
+```
+
+## Rancher
+
+Set the Rancher hostname and Let's Encrypt email in `group_vars/all/vars.yml` before running the playbook:
+
+```yaml
+rancher_hostname: "rancher.example.com"
+letsencrypt_email: "admin@example.com"
+```
+
+The playbook keeps TLS responsibilities separate:
+
+```txt
+helm          -> installs Helm on the master node
+cert_manager  -> installs cert-manager with Helm
+cert_issuer   -> creates the Let's Encrypt ClusterIssuer
+rancher       -> installs Rancher with Helm using external TLS termination
+```
+
+After the playbook completes, add a Cloudflare Tunnel public hostname for the same Rancher hostname and point it to the local HAProxy frontend on the load balancer:
+
+```txt
+Type: HTTP
+URL: http://localhost:80
+```
+
+Rancher is installed with:
+
+```txt
+tls=external
+```
+
+so public TLS is terminated by Cloudflare and the tunnel forwards HTTP to HAProxy.
+
+For Let's Encrypt HTTP-01 validation, the Cloudflare public hostname must route to the cluster ingress. If the certificate stays pending, confirm the public hostname exists before rerunning the `cert_issuer` and `rancher` roles.
+
+Because Cloudflare terminates public TLS before forwarding traffic through the tunnel, the HTTP frontend on HAProxy sets the forwarded protocol headers before sending traffic to ingress-nginx:
+
+```haproxy
+http-request set-header X-Forwarded-Proto https
+http-request set-header X-Forwarded-Ssl on
+```
+
+These headers belong in HAProxy rather than the Rancher Ingress because HAProxy is the first local hop after `cloudflared` and knows that public client traffic arrived over HTTPS.
+
+The playbook also patches the RKE2 ingress-nginx controller ConfigMap with:
+
+```yaml
+use-forwarded-headers: "true"
+compute-full-forwarded-for: "true"
+```
+
+so ingress-nginx forwards the HAProxy headers to Rancher instead of replacing them with its local HTTP scheme.
+
+Then open:
+
+```txt
+https://rancher.example.com
 ```
 
 ## Verify

@@ -1,0 +1,52 @@
+- name: Skip netplan configuration when disabled
+  ansible.builtin.meta: end_host
+  when: not (lab_configure_netplan | bool)
+
+- name: Require netplan config for this host
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in lab_netplan_hosts
+    fail_msg: "No lab_netplan_hosts entry for {{ inventory_hostname }}."
+
+- name: Show detected network interfaces
+  ansible.builtin.command: ip -br link
+  register: netplan_interfaces
+  changed_when: false
+
+- name: Print detected network interfaces
+  ansible.builtin.debug:
+    var: netplan_interfaces.stdout_lines
+
+- name: Ensure netplan directory exists
+  ansible.builtin.file:
+    path: /etc/netplan
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render RKE2 lab netplan file
+  ansible.builtin.template:
+    src: rke2-lab-netplan.yaml.j2
+    dest: "{{ lab_netplan_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Validate netplan configuration
+  ansible.builtin.command: netplan generate
+  changed_when: false
+
+- name: Apply netplan configuration
+  ansible.builtin.command: netplan apply
+  changed_when: true
+  when: lab_netplan_apply | bool
+
+- name: Show routes after netplan
+  ansible.builtin.command: ip route
+  register: netplan_routes
+  changed_when: false
+
+- name: Print routes after netplan
+  ansible.builtin.debug:
+    var: netplan_routes.stdout_lines
