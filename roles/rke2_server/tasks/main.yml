@@ -1,0 +1,90 @@
+- name: Create RKE2 config directory
+  ansible.builtin.file:
+    path: /etc/rancher/rke2
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write RKE2 server config
+  ansible.builtin.copy:
+    dest: /etc/rancher/rke2/config.yaml
+    content: |
+      write-kubeconfig-mode: "0644"
+      node-name: "{{ inventory_hostname }}"
+      node-ip: "{{ node_ip }}"
+      tls-san:
+        - "{{ rke2_master_ip }}"
+        - "{{ rke2_master_hostname }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart rke2-server
+
+- name: Check if RKE2 binary exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/rke2
+  register: rke2_binary
+
+- name: Install RKE2 server
+  ansible.builtin.shell: curl -sfL https://get.rke2.io | sh -
+  args:
+    executable: /bin/bash
+  when: not rke2_binary.stat.exists
+
+- name: Enable and start rke2-server
+  ansible.builtin.systemd:
+    name: rke2-server
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for RKE2 kubeconfig
+  ansible.builtin.wait_for:
+    path: /etc/rancher/rke2/rke2.yaml
+    timeout: 300
+
+- name: Wait for RKE2 node token
+  ansible.builtin.wait_for:
+    path: /var/lib/rancher/rke2/server/node-token
+    timeout: 300
+
+- name: Wait for Kubernetes API to respond
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl get nodes
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: kubectl_ready
+  changed_when: false
+  retries: 30
+  delay: 10
+  until: kubectl_ready.rc == 0
+
+- name: Read RKE2 node token
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/rke2/server/node-token
+  register: rke2_node_token
+
+- name: Store RKE2 token as fact for workers
+  ansible.builtin.set_fact:
+    rke2_token: "{{ rke2_node_token.content | b64decode | trim }}"
+
+- name: Create kube config directory for root
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    mode: "0700"
+
+- name: Copy kubeconfig for root
+  ansible.builtin.copy:
+    src: /etc/rancher/rke2/rke2.yaml
+    dest: /root/.kube/config
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Add RKE2 kubectl path to root bashrc
+  ansible.builtin.lineinfile:
+    path: /root/.bashrc
+    line: 'export PATH=$PATH:/var/lib/rancher/rke2/bin'
+    create: true

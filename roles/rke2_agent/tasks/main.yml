@@ -1,0 +1,42 @@
+- name: Create RKE2 config directory
+  ansible.builtin.file:
+    path: /etc/rancher/rke2
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Get RKE2 token from master
+  ansible.builtin.set_fact:
+    rke2_token_from_master: "{{ hostvars[groups['masters'][0]].rke2_token }}"
+
+- name: Write RKE2 agent config
+  ansible.builtin.copy:
+    dest: /etc/rancher/rke2/config.yaml
+    content: |
+      server: https://{{ rke2_master_ip }}:9345
+      token: "{{ rke2_token_from_master }}"
+      node-name: "{{ inventory_hostname }}"
+      node-ip: "{{ node_ip }}"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart rke2-agent
+
+- name: Check if RKE2 binary exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/rke2
+  register: rke2_binary
+
+- name: Install RKE2 agent
+  ansible.builtin.shell: curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" sh -
+  args:
+    executable: /bin/bash
+  when: not rke2_binary.stat.exists
+
+- name: Enable and start rke2-agent
+  ansible.builtin.systemd:
+    name: rke2-agent
+    enabled: true
+    state: started
+    daemon_reload: true

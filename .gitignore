@@ -1,0 +1,46 @@
+# Ansible runtime
+*.retry
+.ansible/
+ansible.log
+
+# Secrets and local overrides
+*.vault
+vault*.yml
+vault*.yaml
+group_vars/**/vault.yml
+group_vars/**/vault.yaml
+host_vars/**/vault.yml
+host_vars/**/vault.yaml
+*.local.yml
+*.local.yaml
+*.local.ini
+
+# Generated Kubernetes/RKE2 artifacts
+kubeconfig*
+*.kubeconfig
+rke2.yaml
+token
+node-token
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.python-version
+.venv/
+venv/
+env/
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+*.tmp

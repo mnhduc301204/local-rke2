@@ -1,0 +1,35 @@
+- name: Prepare all RKE2 nodes
+  hosts: rke2_cluster
+  become: true
+  roles:
+    - common
+
+- name: Install RKE2 server
+  hosts: masters
+  become: true
+  roles:
+    - rke2_server
+
+- name: Install RKE2 agents
+  hosts: workers
+  become: true
+  roles:
+    - rke2_agent
+
+- name: Verify RKE2 cluster
+  hosts: masters
+  become: true
+  tasks:
+    - name: Wait for all nodes to be visible
+      ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+      register: kubectl_nodes
+      changed_when: false
+      retries: 20
+      delay: 10
+      until: kubectl_nodes.rc == 0
+
+    - name: Show cluster nodes
+      ansible.builtin.debug:
+        var: kubectl_nodes.stdout_lines

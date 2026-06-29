@@ -1,0 +1,8 @@
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+
+- name: Restart systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  failed_when: false
