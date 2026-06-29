@@ -1,5 +1,5 @@
-- name: Prepare all RKE2 nodes
-  hosts: rke2_cluster
+- name: Prepare all lab nodes
+  hosts: all_lab
   become: true
   roles:
     - common
@@ -16,20 +16,29 @@
   roles:
     - rke2_agent
 
-- name: Verify RKE2 cluster
+- name: Configure ingress NodePort
+  hosts: masters
+  become: true
+  roles:
+    - k8s_ingress_nodeport
+
+- name: Configure load balancer
+  hosts: load_balancers
+  become: true
+  roles:
+    - load_balancer
+
+- name: Verify cluster from master
   hosts: masters
   become: true
   tasks:
-    - name: Wait for all nodes to be visible
+    - name: Show nodes
       ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl get nodes -o wide
       environment:
         KUBECONFIG: /etc/rancher/rke2/rke2.yaml
-      register: kubectl_nodes
+      register: nodes_result
       changed_when: false
-      retries: 20
-      delay: 10
-      until: kubectl_nodes.rc == 0
 
-    - name: Show cluster nodes
+    - name: Print nodes
       ansible.builtin.debug:
-        var: kubectl_nodes.stdout_lines
+        var: nodes_result.stdout_lines

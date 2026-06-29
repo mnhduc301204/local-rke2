@@ -1,0 +1,62 @@
+- name: Wait for Kubernetes API to respond
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl get nodes
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: kubectl_ready
+  changed_when: false
+  retries: 30
+  delay: 10
+  until: kubectl_ready.rc == 0
+
+- name: Render ingress NodePort manifest
+  ansible.builtin.template:
+    src: ingress-nginx-nodeport.yaml.j2
+    dest: /tmp/ingress-nginx-nodeport.yaml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply ingress NodePort service
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl apply -f /tmp/ingress-nginx-nodeport.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: ingress_nodeport_apply
+  changed_when: "'created' in ingress_nodeport_apply.stdout or 'configured' in ingress_nodeport_apply.stdout"
+
+- name: Show ingress NodePort service
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl get svc -n kube-system ingress-nginx-nodeport -o wide
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: ingress_nodeport_service
+  changed_when: false
+
+- name: Print ingress NodePort service
+  ansible.builtin.debug:
+    var: ingress_nodeport_service.stdout_lines
+
+- name: Show ingress NodePort endpoints
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl get endpoints -n kube-system ingress-nginx-nodeport
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: ingress_nodeport_endpoints
+  changed_when: false
+
+- name: Print ingress NodePort endpoints
+  ansible.builtin.debug:
+    var: ingress_nodeport_endpoints.stdout_lines
+
+- name: Show ingress pod labels when endpoints are empty
+  ansible.builtin.shell: /var/lib/rancher/rke2/bin/kubectl get pods -n kube-system --show-labels | grep ingress
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+  register: ingress_pod_labels
+  changed_when: false
+  failed_when: false
+  when: "'<none>' in ingress_nodeport_endpoints.stdout"
+
+- name: Print ingress pod labels
+  ansible.builtin.debug:
+    var: ingress_pod_labels.stdout_lines
+  when: ingress_pod_labels is defined and ingress_pod_labels.stdout_lines is defined

@@ -1,0 +1,17 @@
+rke2_master_ip: "192.168.56.101"
+rke2_master_hostname: "rke2-master-01"
+
+lb_ip: "192.168.56.100"
+
+ingress_http_nodeport: 30080
+ingress_https_nodeport: 30443
+
+rke2_nodes:
+  - name: master01
+    ip: 192.168.56.101
+  - name: worker01
+    ip: 192.168.56.102
+  - name: worker02
+    ip: 192.168.56.103
+
+cloudflare_tunnel_token: ""

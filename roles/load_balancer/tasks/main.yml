@@ -1,0 +1,107 @@
+- name: Install load balancer packages
+  ansible.builtin.apt:
+    name:
+      - haproxy
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+
+- name: Render HAProxy configuration
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    validate: haproxy -c -f %s
+  notify: Restart haproxy
+
+- name: Enable and start HAProxy
+  ansible.builtin.systemd:
+    name: haproxy
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Gather installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Install cloudflared package
+  ansible.builtin.apt:
+    deb: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+    state: present
+  when: "'cloudflared' not in ansible_facts.packages"
+
+- name: Check cloudflared service unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/cloudflared.service
+  register: cloudflared_service_unit
+
+- name: Install cloudflared tunnel service
+  ansible.builtin.command: cloudflared service install {{ cloudflare_tunnel_token }}
+  register: cloudflared_service_install
+  changed_when: cloudflared_service_install.rc == 0
+  no_log: true
+  when:
+    - cloudflare_tunnel_token | length > 0
+    - not cloudflared_service_unit.stat.exists
+
+- name: Enable and start cloudflared
+  ansible.builtin.systemd:
+    name: cloudflared
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: cloudflare_tunnel_token | length > 0
+
+- name: Verify HAProxy configuration
+  ansible.builtin.command: haproxy -c -f /etc/haproxy/haproxy.cfg
+  register: haproxy_config_check
+  changed_when: false
+
+- name: Print HAProxy configuration check
+  ansible.builtin.debug:
+    var: haproxy_config_check.stdout_lines
+
+- name: Show HAProxy service status
+  ansible.builtin.command: systemctl is-active haproxy
+  register: haproxy_status
+  changed_when: false
+
+- name: Print HAProxy service status
+  ansible.builtin.debug:
+    var: haproxy_status.stdout
+
+- name: Verify HAProxy HTTP frontend locally
+  ansible.builtin.command: curl -I http://127.0.0.1
+  register: haproxy_http_check
+  changed_when: false
+  failed_when: false
+
+- name: Print HAProxy HTTP frontend check
+  ansible.builtin.debug:
+    var: haproxy_http_check.stdout_lines
+
+- name: Verify HAProxy stats endpoint locally
+  ansible.builtin.command: curl -I http://127.0.0.1:8404/stats
+  register: haproxy_stats_check
+  changed_when: false
+  failed_when: false
+
+- name: Print HAProxy stats endpoint check
+  ansible.builtin.debug:
+    var: haproxy_stats_check.stdout_lines
+
+- name: Show cloudflared service status
+  ansible.builtin.command: systemctl is-active cloudflared
+  register: cloudflared_status
+  changed_when: false
+  failed_when: false
+  when: cloudflare_tunnel_token | length > 0
+
+- name: Print cloudflared service status
+  ansible.builtin.debug:
+    var: cloudflared_status.stdout
+  when: cloudflare_tunnel_token | length > 0

@@ -1,8 +1,9 @@
 # RKE2 Ansible Lab
 
-Ansible project to install one RKE2 server and two RKE2 agents:
+Ansible project to install one RKE2 server, two RKE2 agents, and one load balancer VM running HAProxy plus optional Cloudflare Tunnel:
 
 ```txt
+rke2-lb-01       192.168.56.100
 rke2-master-01   192.168.56.101
 rke2-worker-01   192.168.56.102
 rke2-worker-02   192.168.56.103
@@ -10,24 +11,25 @@ rke2-worker-02   192.168.56.103
 
 ## Prerequisites
 
-- Three Ubuntu VMs are already created.
+- Four Ubuntu VMs are already created.
 - Static IPs are already configured.
 - `openssh-server` is installed on all VMs.
 - The Ansible control machine can SSH to all VMs.
 - Update `ansible_user` in `inventory.ini` if your Ubuntu user is not `duc`.
+- Set `cloudflare_tunnel_token` in `group_vars/all.yml` when you want Ansible to install and start the Cloudflare Tunnel service.
 
 ## Validate SSH
 
 With password auth:
 
 ```bash
-ansible -i inventory.ini all -m ping --ask-pass --ask-become-pass
+ansible -i inventory.ini all_lab -m ping --ask-pass --ask-become-pass
 ```
 
 With SSH key auth:
 
 ```bash
-ansible -i inventory.ini all -m ping
+ansible -i inventory.ini all_lab -m ping
 ```
 
 ## Install RKE2
@@ -51,6 +53,20 @@ On the master node:
 ```bash
 sudo /var/lib/rancher/rke2/bin/kubectl get nodes -o wide \
   --kubeconfig /etc/rancher/rke2/rke2.yaml
+
+sudo /var/lib/rancher/rke2/bin/kubectl get svc -n kube-system ingress-nginx-nodeport \
+  --kubeconfig /etc/rancher/rke2/rke2.yaml
+
+sudo /var/lib/rancher/rke2/bin/kubectl get endpoints -n kube-system ingress-nginx-nodeport \
+  --kubeconfig /etc/rancher/rke2/rke2.yaml
+```
+
+On the load balancer node:
+
+```bash
+curl -I http://192.168.56.100
+sudo systemctl status haproxy
+sudo systemctl status cloudflared
 ```
 
 Check services if needed:
@@ -58,4 +74,12 @@ Check services if needed:
 ```bash
 sudo journalctl -u rke2-server -f
 sudo journalctl -u rke2-agent -f
+sudo journalctl -u haproxy -f
+sudo journalctl -u cloudflared -f
+```
+
+HAProxy stats are available at:
+
+```txt
+http://192.168.56.100:8404/stats
 ```

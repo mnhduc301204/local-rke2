@@ -82,6 +82,7 @@
     path: /etc/hosts
     marker: "# {mark} ANSIBLE RKE2 LAB HOSTS"
     block: |
+      192.168.56.100 rke2-lb-01
       192.168.56.101 rke2-master-01
       192.168.56.102 rke2-worker-01
       192.168.56.103 rke2-worker-02
