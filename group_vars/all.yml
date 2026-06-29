@@ -14,4 +14,4 @@ rke2_nodes:
   - name: worker02
     ip: 192.168.56.103
 
-cloudflare_tunnel_token: ""
+cloudflare_tunnel_token: "{{ vault_cloudflare_tunnel_token | default('') }}"

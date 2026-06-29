@@ -16,7 +16,7 @@ rke2-worker-02   192.168.56.103
 - `openssh-server` is installed on all VMs.
 - The Ansible control machine can SSH to all VMs.
 - Update `ansible_user` in `inventory.ini` if your Ubuntu user is not `duc`.
-- Set `cloudflare_tunnel_token` in `group_vars/all.yml` when you want Ansible to install and start the Cloudflare Tunnel service.
+- Set `vault_cloudflare_tunnel_token` in an encrypted Ansible Vault file when you want Ansible to install and start the Cloudflare Tunnel service.
 
 ## Validate SSH
 
@@ -44,6 +44,14 @@ With SSH key auth:
 
 ```bash
 ansible-playbook -i inventory.ini site.yml
+```
+
+With encrypted secrets:
+
+```bash
+cp group_vars/secrets.example.yml group_vars/vault.yml
+ansible-vault encrypt group_vars/vault.yml
+ansible-playbook -i inventory.ini site.yml --ask-vault-pass
 ```
 
 ## Verify
