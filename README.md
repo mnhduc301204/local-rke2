@@ -25,7 +25,17 @@ Only `rke2-lb-01` should receive application traffic from outside the lab, throu
 
 ## VM Networking
 
-Ansible can write netplan files inside the VMs, but it cannot create missing virtual NICs unless the hypervisor is managed separately. In the simple lab setup, keep each VM on the NAT/private network that already lets the nodes reach each other and reach the internet.
+Ansible writes netplan files inside the VMs, but it cannot create missing virtual NICs unless the hypervisor is managed separately. In the simple lab setup, keep each VM on the NAT/private network that already lets the nodes reach each other and reach the internet.
+
+The default vars assume VMware NAT-style routing:
+
+```txt
+VM subnet:       192.168.56.0/24
+Default gateway: 192.168.56.2
+Interface:       ens33
+```
+
+If your hypervisor uses a different gateway or interface name, update `lab_gateway_ip` and `lab_netplan_hosts` in `group_vars/all/vars.yml` before applying netplan. For Cloudflare Tunnel, `rke2-lb-01` must be on a NAT or bridged network with outbound internet access, not a host-only network.
 
 Check interface names first:
 
@@ -33,11 +43,15 @@ Check interface names first:
 ansible -i inventory.ini all_lab -m command -a "ip -br link" --ask-pass --ask-become-pass
 ```
 
-Then update `lab_netplan_hosts` in `group_vars/all/vars.yml` if your interface names are not `ens33` and `ens34`. To let Ansible apply netplan, set:
+Then update `lab_netplan_hosts` in `group_vars/all/vars.yml` if your interface name is not `ens33`. Netplan is enabled by default:
 
 ```yaml
 lab_configure_netplan: true
+lab_gateway_ip: "192.168.56.2"
+lab_netplan_disable_existing: true
 ```
+
+When `lab_netplan_disable_existing` is enabled, the netplan role renders `/etc/netplan/99-rke2-lab.yaml`, backs up other `/etc/netplan/*.yaml` and `/etc/netplan/*.yml` files into `/etc/netplan/ansible-backup`, then removes those unmanaged files before `netplan generate` and `netplan apply`. This prevents old DHCP/static definitions for the same interface from being merged with the lab route.
 
 Run only the network step first:
 

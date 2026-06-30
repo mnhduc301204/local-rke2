@@ -1,4 +1,5 @@
 network:
   version: 2
+  renderer: {{ lab_netplan_renderer | default('networkd') }}
   ethernets:
 {{ lab_netplan_hosts[inventory_hostname].ethernets | to_nice_yaml(indent=2) | indent(4, true) }}

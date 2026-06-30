@@ -33,6 +33,56 @@
     group: root
     mode: "0600"
 
+- name: Find existing netplan files
+  ansible.builtin.find:
+    paths: /etc/netplan
+    patterns:
+      - "*.yaml"
+      - "*.yml"
+    file_type: file
+  register: lab_existing_netplan_files
+  when: lab_netplan_disable_existing | bool
+
+- name: Select unmanaged netplan files
+  ansible.builtin.set_fact:
+    lab_unmanaged_netplan_files: >-
+      {{
+        lab_existing_netplan_files.files
+        | default([])
+        | rejectattr('path', 'equalto', lab_netplan_file)
+        | list
+      }}
+  when: lab_netplan_disable_existing | bool
+
+- name: Ensure netplan backup directory exists
+  ansible.builtin.file:
+    path: "{{ lab_netplan_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when:
+    - lab_netplan_disable_existing | bool
+    - lab_unmanaged_netplan_files | default([]) | length > 0
+
+- name: Backup unmanaged netplan files
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ lab_netplan_backup_dir }}/{{ item.path | basename }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ lab_unmanaged_netplan_files | default([]) }}"
+  when: lab_netplan_disable_existing | bool
+
+- name: Remove unmanaged netplan files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ lab_unmanaged_netplan_files | default([]) }}"
+  when: lab_netplan_disable_existing | bool
+
 - name: Validate netplan configuration
   ansible.builtin.command: netplan generate
   changed_when: false
